@@ -1,6 +1,6 @@
 from copy import deepcopy
 from json.decoder import JSONDecodeError
-from typing import Dict, List, Tuple
+from typing import Dict, Iterator, List, Tuple
 
 from instagrapi.exceptions import (
     ClientError,
@@ -1121,3 +1121,147 @@ class UserMixin:
         }
         result = self.private_request("friendships/set_besties/", data)
         return json_value(result, "friendship_statuses", user_id, "is_bestie") == False
+
+    def user_followers_iter(
+            self, user_id: str, use_cache: bool = True
+    ) -> Iterator[UserShort]:
+        """
+        Get user's followers using an iterator
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+        use_cache: bool, optional
+            Whether or not to use information from cache, default value is True
+
+        Returns
+        -------
+        Iterator[UserShort]
+            Iterator of User object
+        """
+        user_id = str(user_id)
+        users = self._users_followers.get(user_id, {})
+
+        # first return users from cache
+        if use_cache and users:
+            for user in users.values():
+                yield user
+        
+        # then use the api
+        try:
+            for user in self.user_followers_gql_iter(user_id):
+                self._users_followers[user.pk] = user
+                yield user
+        except Exception as e:
+            if not isinstance(e, ClientError):
+                self.logger.exception(e)
+            for user in self.user_followers_v1_iter(user_id):
+                self._users_followers[user.pk] = user
+                yield user
+
+    def user_followers_gql_iter(self, user_id: str) -> Iterator[UserShort]:
+        """
+        Get user's followers information by Public Graphql API
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+
+        Returns
+        -------
+        Iterator[UserShort]
+            List of objects of User type
+        """
+        for user in self.user_followers_gql_chunk_iter(user_id):
+            yield user
+
+    def user_followers_gql_chunk_iter(self, user_id: str, max_id: str = "") -> Iterator[UserShort]:
+        """
+        Get user's followers information by Private Mobile API and max_id (cursor)
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+        max_id: str, optional
+            Max ID, default value is empty String
+
+        Returns
+        -------
+        Iterator[UserShort]
+            Iterator of users
+        """
+        unique_set = set()
+        while True:
+            result = self.private_request(f"friendships/{user_id}/followers/", params={
+                "max_id": max_id,
+                "count": 10000,
+                "rank_token": self.rank_token,
+                "search_surface": "follow_list_page",
+                "query": "",
+                "enable_groups": "true"
+            })
+            for user in result["users"]:
+                user = extract_user_short(user)
+                if user.pk in unique_set:
+                    continue
+                unique_set.add(user.pk)
+                yield user
+            max_id = result.get("next_max_id")
+            if not max_id:
+                break
+
+    def user_followers_v1_iter(self, user_id: str) -> Iterator[UserShort]:
+        """
+        Get user's followers information by Private Mobile API
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+
+        Returns
+        -------
+        Iterator[UserShort]
+            Iterator of objects of User type
+        """
+        for user in self.user_followers_v1_chunk_iter(user_id):
+            yield user
+
+    def user_followers_v1_chunk_iter(self, user_id: str, max_id: str = "") -> Iterator[UserShort]:
+        """
+        Get user's followers information by Private Mobile API and max_id (cursor)
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+        max_id: str, optional
+            Max ID, default value is empty String
+
+        Returns
+        -------
+        Tuple[List[UserShort], str]
+            Tuple of List of users and max_id
+        """
+        unique_set = set()
+        while True:
+            result = self.private_request(f"friendships/{user_id}/followers/", params={
+                "max_id": max_id,
+                "count": 10000,
+                "rank_token": self.rank_token,
+                "search_surface": "follow_list_page",
+                "query": "",
+                "enable_groups": "true"
+            })
+            for user in result["users"]:
+                user = extract_user_short(user)
+                if user.pk in unique_set:
+                    continue
+                unique_set.add(user.pk)
+                yield user
+            max_id = result.get("next_max_id")
+            if not max_id:
+                break
