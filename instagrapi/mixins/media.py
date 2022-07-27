@@ -3,7 +3,7 @@ import random
 import time
 from copy import deepcopy
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, Iterator, List, Tuple
 from urllib.parse import urlparse
 
 from instagrapi.exceptions import (
@@ -925,3 +925,107 @@ class MediaMixin:
         A boolean value
         """
         return self.media_pin(media_pk, True)
+
+    def user_medias_iter(self, user_id: int) -> Iterator[Media]:
+        """
+        Get a user's media
+
+        Parameters
+        ----------
+        user_id: int
+
+        Returns
+        -------
+        Iterator[Media]
+            Iterator of objects of Media
+        """
+        user_id = int(user_id)
+        try:
+            try:
+                for media in self.user_medias_gql_iter(user_id):
+                    yield media
+            except ClientLoginRequired as e:
+                if not self.inject_sessionid_to_public():
+                    raise e
+                for media in self.user_medias_gql_iter(user_id):  # retry
+                    yield media
+        except Exception as e:
+            if not isinstance(e, ClientError):
+                self.logger.exception(e)
+            # User may been private, attempt via Private API
+            # (You can check is_private, but there may be other reasons,
+            #  it is better to try through a Private API)
+            for media in self.user_medias_v1_iter(user_id):
+                yield media
+
+    def user_medias_gql_iter(
+            self, user_id: int, sleep: int = 2
+    ) -> Iterator[Media]:
+        """
+        Get a user's media by Public Graphql API
+
+        Parameters
+        ----------
+        user_id: int
+        sleep: int, optional
+            Timeout between pages iterations, default is 2
+
+        Returns
+        -------
+        Iterator[Media]
+            Iterator of objects of Media
+        """
+        user_id = int(user_id)
+        end_cursor = None
+        variables = {
+            "id": user_id,
+            "first": 50,
+            # These are Instagram restrictions, you can only specify <= 50
+        }
+        while True:
+            self.logger.info(f"user_medias_gql: {end_cursor}")
+            if end_cursor:
+                variables["after"] = end_cursor
+            medias_page, end_cursor = self.user_medias_paginated_gql(
+                user_id, sleep, end_cursor=end_cursor
+            )
+            for media in medias_page:
+                yield media
+
+            if not end_cursor:
+                break
+
+            time.sleep(sleep)
+
+    def user_medias_v1_iter(self, user_id: int) -> Iterator[Media]:
+        """
+        Get a user's media by Private Mobile API
+
+        Parameters
+        ----------
+        user_id: int
+
+        Returns
+        -------
+        Iterator[Media]
+            Iterator of objects of Media
+        """
+        user_id = int(user_id)
+        next_max_id = ""
+        while True:
+            try:
+                medias_page, next_max_id = self.user_medias_paginated_v1(
+                    user_id,
+                    end_cursor=next_max_id
+                )
+            except Exception as e:
+                self.logger.exception(e)
+                break
+            
+            for media in medias_page:
+                yield media
+
+            if not self.last_json.get("more_available"):
+                break
+
+            next_max_id = self.last_json.get("next_max_id", "")

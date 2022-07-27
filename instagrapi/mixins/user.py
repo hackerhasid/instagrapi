@@ -1265,3 +1265,68 @@ class UserMixin:
             max_id = result.get("next_max_id")
             if not max_id:
                 break
+
+    def user_following_iter(
+            self, user_id: str, use_cache: bool = True,
+    ) -> Iterator[UserShort]:
+        """
+        Get user's followers information
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+        use_cache: bool, optional
+            Whether or not to use information from cache, default value is True
+
+        Returns
+        -------
+        Iterator[UserShort]
+            Iterator of User object
+        """
+        user_id = str(user_id)
+        users = self._users_following.get(user_id, {})
+
+        if use_cache and users:
+            for user in users.values():
+                yield user
+
+        for user in self.user_following_v1_iter(user_id):
+            self._users_following[user.pk] = user
+            yield user
+
+    def user_following_v1_iter(self, user_id: str) -> Iterator[UserShort]:
+        """
+        Get user's following users information by Private Mobile API
+
+        Parameters
+        ----------
+        user_id: str
+            User id of an instagram account
+        amount: int, optional
+            Maximum number of media to return, default is 0
+
+        Returns
+        -------
+        Iterator[UserShort]
+            Iterator of objects of User type
+        """
+        user_id = str(user_id)
+        max_id = ""
+        while True:
+            params = {
+                "rank_token": self.rank_token,
+                "search_surface": "follow_list_page",
+                "includes_hashtags": "true",
+                "enable_groups": "true",
+                "query": "",
+                "count": 10000
+            }
+            if max_id:
+                params["max_id"] = max_id
+            result = self.private_request(f"friendships/{user_id}/following/", params=params)
+            for user in result["users"]:
+                yield extract_user_short(user)
+            max_id = result.get("next_max_id")
+            if not max_id:
+                break

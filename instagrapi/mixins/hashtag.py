@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Iterator, List, Tuple
 
 from instagrapi.exceptions import ClientError, HashtagNotFound
 from instagrapi.extractors import (
@@ -419,3 +419,75 @@ class HashtagMixin:
         except ClientError:
             medias = self.hashtag_medias_recent_v1(name, amount)
         return medias
+
+    def hashtag_medias_v1_chunk_iter(
+        self, name: str, tab_key: str = "", max_id: str = None
+    ) -> Iterator[Media]:
+        """
+        Get chunk of medias for a hashtag and max_id (cursor) by Private Mobile API
+
+        Parameters
+        ----------
+        name: str
+            Name of the hashtag
+        tab_key: str, optional
+            Tab Key, default value is ""
+        max_id: str
+            Max ID, default value is None
+
+        Returns
+        -------
+        Tuple[List[Media], str]
+            List of objects of Media and max_id
+        """
+        assert tab_key in ("top", "recent"), \
+            'You must specify one of the options for "tab_key" ("top" or "recent")'
+        data = {
+            "supported_tabs": dumps([tab_key]),
+            # 'lat': 59.8626416,
+            # 'lng': 30.5126682,
+            "include_persistent": "true",
+            "rank_token": self.rank_token,
+            "count": 10000,
+        }
+        medias = []
+        while True:
+            result = self.private_request(
+                f"tags/{name}/sections/",
+                params={"max_id": max_id} if max_id else {},
+                data=self.with_default_data(data),
+            )
+            for section in result["sections"]:
+                layout_content = section.get("layout_content") or {}
+                nodes = layout_content.get("medias") or []
+                for node in nodes:
+                    media = extract_media_v1(node["media"])
+                    # check contains hashtag in caption
+                    if f"#{name}" not in media.caption_text:
+                        continue
+                    yield media
+                    medias.append(media)
+            if not result["more_available"]:
+                break
+            max_id = result["next_max_id"]
+
+    def hashtag_medias_v1_iter(
+        self, name: str, tab_key: str = ""
+    ) -> Iterator[Media]:
+        """
+        Get medias for a hashtag by Private Mobile API
+
+        Parameters
+        ----------
+        name: str
+            Name of the hashtag
+        tab_key: str, optional
+            Tab Key, default value is ""
+
+        Returns
+        -------
+        Iterator[Media]
+            Iterator of objects of Media
+        """
+        for media in self.hashtag_medias_v1_chunk(name, tab_key):
+            yield media
