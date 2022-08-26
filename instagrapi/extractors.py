@@ -187,7 +187,10 @@ def extract_user_v1(data):
     """For Private API"""
     data["external_url"] = data.get("external_url") or None
     pic_hd = data.get("hd_profile_pic_url_info") or data.get("hd_profile_pic_versions")
-    data["profile_pic_url_hd"] = pic_hd.get("url")
+    if pic_hd:
+        data["profile_pic_url_hd"] = pic_hd.get("url")
+    else:
+         data["profile_pic_url_hd"] = None
     return User(**data)
 
 
